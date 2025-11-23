@@ -5,33 +5,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Emoji Survivor</title>
 
-  <!-- Fonts -->
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 
-  <!-- External CSS -->
   <link rel="stylesheet" href="style.css">
 
-  <!-- Tone.js library -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
 </head>
 <body>
-  <!-- Start Screen -->
   <div id="startScreen">
     <button id="startButton">Tap to Start</button>
   </div>
 
-  <!-- Loading Screen -->
   <div id="loadingScreen">
     <p id="loadingText">Loading Assets...</p>
   </div>
 
-  <!-- Splash Screen -->
   <div id="splashScreen">
     <img id="splashLogo" src="sprites/toastygames.png" alt="Toasty Games Logo">
   </div>
 
-  <!-- Difficulty Select -->
   <div id="difficultyContainer">
     <div id="difficultyScreen">
       <h1 id="mainTitle">Emoji Survivor</h1>
@@ -66,7 +59,6 @@
     </div>
   </div>
 
-  <!-- Map Select -->
   <div id="mapSelectContainer">
     <div id="mapSelectScreen">
       <h1>Select a Map</h1>
@@ -75,7 +67,6 @@
     </div>
   </div>
 
-  <!-- Character Select -->
   <div id="characterSelectContainer">
     <div id="characterSelectScreen">
       <h1>Choose Character</h1>
@@ -84,7 +75,6 @@
     </div>
   </div>
 
-  <!-- Upgrade Shop -->
   <div id="upgradeShop">
     <h2>Permanent Upgrades</h2>
     <p id="currencyDisplay">Coins: 0 💰</p>
@@ -96,7 +86,6 @@
     <button id="backToMenuButton" class="difficulty-buttons">Back</button>
   </div>
 
-  <!-- Achievements -->
   <div id="achievementsModal">
     <div class="content-wrapper">
       <h2>🏆 Achievements</h2>
@@ -106,7 +95,6 @@
     </div>
   </div>
 
-  <!-- Cheats -->
   <div id="cheatsModal">
     <div class="content-wrapper">
       <h2>👾 Cheats Menu</h2>
@@ -116,18 +104,24 @@
     </div>
   </div>
 
-  <!-- Game Guide -->
   <div id="gameGuideModal">
     <div class="content-wrapper">
       <h2>📜 Game Guide</h2>
       <div class="guide-columns">
-        <!-- controls, pickups, obstacles etc go here -->
+        <div>
+            <h3>Controls</h3>
+            <ul>
+                <li><strong>Move:</strong> Arrow Keys / WASD / Left Joystick</li>
+                <li><strong>Aim/Fire:</strong> Auto-fire / Right Joystick</li>
+                <li><strong>Dash:</strong> Spacebar / Tap Screen (Right side)</li>
+                <li><strong>Pause:</strong> P / Escape</li>
+            </ul>
+        </div>
       </div>
       <button id="backToDifficultyButton">Back to Difficulty Select</button>
     </div>
   </div>
 
-  <!-- Game Container -->
   <div id="gameContainer">
     <canvas id="gameCanvas"></canvas>
     <div id="pauseButton">⏸️</div>
@@ -157,7 +151,6 @@
     </div>
   </div>
 
-  <!-- Game Stats -->
   <div id="gameStats">
     <p>Level: <span id="currentLevel">1</span></p>
     <p>Score: <span id="currentScore">0</span></p>
@@ -172,10 +165,8 @@
     <div id="upgradeStats"></div>
   </div>
 
-  <!-- Mobile Reset -->
   <button id="mobileResetButton" style="background-color: #808080;">Reset Game</button>
 
-  <!-- Joysticks -->
   <div id="movement-stick-base" class="thumbstick-base">
     <div id="movement-stick-cap" class="thumbstick-cap"></div>
   </div>
@@ -183,21 +174,18 @@
     <div id="fire-stick-cap" class="thumbstick-cap"></div>
   </div>
 
-  <!-- Upgrade Menu -->
   <div id="upgradeMenu">
     <img id="levelUpBox" src="" style="display: none; margin-bottom: 10px;" alt="Level Up!">
     <h2>Level Up!</h2>
     <div class="upgrade-options-container" id="upgradeOptionsContainer"></div>
   </div>
 
-  <!-- Merchant -->
   <div id="merchantShop">
     <h2>Wandering Merchant 🧙‍♂️</h2>
     <div class="merchant-options-container" id="merchantOptionsContainer"></div>
     <button id="leaveMerchantButton">Leave</button>
   </div>
 
-  <!-- Game Over -->
   <div id="gameOverlay">
     <h2>GAME OVER!</h2>
     <p>Total Score: <span id="finalScore">0</span></p>
@@ -208,7 +196,6 @@
     <button id="restartButton">Restart Game</button>
   </div>
 
-  <!-- Achievement Banner -->
   <div id="achievement-banner">
     <div id="achievement-banner-icon" class="achievement-icon"></div>
     <div class="achievement-details">
@@ -217,8 +204,5 @@
     </div>
   </div>
 
-  <script src="script.js"></script>
-  <script src="skullCharacter.js"></script>
-  
-</body>
+  <script src="utils.js"></script>     <script src="entities.js"></script>  <script src="renderer.js"></script>  <script src="main.js"></script>      </body>
 </html>
