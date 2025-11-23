@@ -1,54 +1,56 @@
-// game.js - Main Game Loop and Logic
+// game.js - Main Game Loop
+// ========================
 import { 
-    gameState, player, playerStats, playerData, 
-    entities, WORLD_WIDTH, WORLD_HEIGHT, ASSETS, 
-    ENEMY_CONFIGS, CONSTANTS, CHARACTERS 
+    gameState, player, playerStats, playerData, runStats,
+    entities, companionState,
+    WORLD_WIDTH, WORLD_HEIGHT, CONSTANTS, 
+    ENEMY_CONFIGS, CHARACTERS, ALWAYS_AVAILABLE_PICKUPS, ASSETS 
 } from './data.js';
 
 import { 
     setupInput, updateGamepad, inputs, 
-    loadAssets, audio, playSound, vibrate, 
-    preRenderEmoji, Quadtree 
+    loadAssets, audioPlayers, playSound, vibrate, 
+    preRenderEmoji, Quadtree, backgroundImages 
 } from './systems.js';
 
 import { 
-    setupUI, updateHUD, showUpgradeMenu, showGameOverScreen, 
+    setupUI, updateHUD, showLevelUpMenu, showMerchantMenu,
     saveGameData 
 } from './ui.js';
 
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 let quadtree;
+let animationFrameId;
 
-// === INITIALIZATION ===
+// === INIT ===
 function init() {
     loadAssets(() => {
-        // Pre-render common emojis for performance
-        ['💀', '🦴', '🧟', '🧛‍♀️', '🔸', '🔹'].forEach(e => preRenderEmoji(e, 30));
+        // Pre-render common emojis
+        ['💀','🦴','🧟','🧛‍♀️','🔸','🔹'].forEach(e => preRenderEmoji(e, 30));
         
         document.getElementById('loadingScreen').style.display = 'none';
         document.getElementById('startScreen').style.display = 'flex';
         
-        // Start Button Listener
         document.getElementById('startButton').addEventListener('click', () => {
-            // Initialize Audio Context on user gesture
             if (Tone.context.state !== 'running') Tone.start();
             document.getElementById('startScreen').style.display = 'none';
             document.getElementById('difficultyContainer').style.display = 'block';
-            audio.players['mainMenu'].start();
+            if(audioPlayers['mainMenu']) audioPlayers['mainMenu'].start();
         });
 
-        setupInput(triggerDash); // Pass dash function to input system
-        setupUI(startGame);      // Pass start function to UI system
+        setupInput(triggerDash);
+        setupUI(startGame);
     });
 }
 
-// === GAME START ===
+// === START ===
 function startGame() {
-    // Reset State
+    if(audioPlayers['mainMenu']) audioPlayers['mainMenu'].stop();
+    // Load a background track...
+    
     gameState.gameActive = true;
     gameState.gameOver = false;
-    gameState.gamePaused = false;
     gameState.score = 0;
     gameState.startTime = Date.now();
     gameState.lastFrameTime = Date.now();
@@ -58,320 +60,270 @@ function startGame() {
     entities.enemies = [];
     entities.projectiles = [];
     entities.pickups = [];
-    entities.visualEffects = [];
     
     // Reset Player
     player.lives = player.maxLives;
     player.xp = 0;
     player.level = 1;
-    player.isSkullCharacter = (gameState.equippedCharacterID === 'skull');
     player.dashCooldown = playerData.hasReducedDashCooldown ? 3000 : 6000;
     
-    // Apply Permanent Upgrades
-    player.damageMultiplier = 1 + (playerData.upgrades.playerDamage || 0) * 0.02;
-    player.speed = CONSTANTS.PLAYER_BASE_SPEED * (1 + (playerData.upgrades.playerSpeed || 0) * 0.015);
+    // Check Character
+    if(gameState.equippedCharacterID === 'skull') {
+        // Skull logic handled in createWeapon/dash
+    }
+
+    quadtree = new Quadtree({x:0, y:0, width:WORLD_WIDTH, height:WORLD_HEIGHT});
     
-    // Stop Menu Music, Start Game Loop
-    audio.players['mainMenu'].stop();
-    requestAnimationFrame(gameLoop);
+    // Apply Upgrades
+    player.damageMultiplier = 1 + (playerData.upgrades.playerDamage||0)*0.02;
+    player.speed = CONSTANTS.PLAYER_BASE_SPEED * (1 + (playerData.upgrades.playerSpeed||0)*0.015);
+
+    animationFrameId = requestAnimationFrame(gameLoop);
 }
 
-// === MAIN LOOP ===
+// === LOOP ===
 function gameLoop() {
-    if (!gameState.gameActive) return;
-    
+    if(!gameState.gameActive) return;
     const now = Date.now();
     const dt = now - gameState.lastFrameTime;
     gameState.lastFrameTime = now;
-    
-    if (!gameState.gamePaused) {
+
+    if(!gameState.gamePaused) {
         update(now, dt);
         draw();
     }
     
     updateHUD();
     updateGamepad(triggerDash, () => gameState.gamePaused = !gameState.gamePaused);
-    
-    if (!gameState.gameOver) requestAnimationFrame(gameLoop);
+    requestAnimationFrame(gameLoop);
 }
 
-// === UPDATE LOGIC ===
+// === UPDATE ===
 function update(now, dt) {
-    // 1. Spawning Logic
-    const enemyCap = 100;
-    if (entities.enemies.length < enemyCap && Math.random() < 0.02) {
-        spawnEnemy();
-    }
-    
-    // 2. Player Movement
+    // 1. Spawning
+    if(entities.enemies.length < 100 && Math.random() < 0.02) spawnEnemy();
+
+    // 2. Player Move
     let dx = inputs.moveX;
     let dy = inputs.moveY;
-    
-    // Apply Speed
+    // Keyboard fallback
+    if(inputs.keys['w']) dy = -1;
+    if(inputs.keys['s']) dy = 1;
+    if(inputs.keys['a']) dx = -1;
+    if(inputs.keys['d']) dx = 1;
+
     const currentSpeed = player.speed * (player.isDashing ? 3.0 : 1.0);
     player.x += dx * currentSpeed;
     player.y += dy * currentSpeed;
     
-    // Bounds Check
+    // Clamp
     player.x = Math.max(player.size/2, Math.min(WORLD_WIDTH - player.size/2, player.x));
     player.y = Math.max(player.size/2, Math.min(WORLD_HEIGHT - player.size/2, player.y));
     
-    // Dash State
-    if (player.isDashing && now - player.lastDashTime > 300) {
+    // Dash End
+    if(player.isDashing && now > player.dashEndTime) {
         player.isDashing = false;
         player.isInvincible = false;
     }
 
-    // 3. Firing Logic
-    // If aiming stick is active or auto-fire is needed
-    const isAiming = inputs.aimX !== 0 || inputs.aimY !== 0;
+    // 3. Firing
     const fireRate = Math.max(100, 400 * (1 - player.upgradeLevels.fireRate * 0.08));
+    const isAiming = inputs.aimX !== 0 || inputs.aimY !== 0;
     
-    if (isAiming && now - inputs.lastFireTime > fireRate) {
-        createWeapon(Math.atan2(inputs.aimY, inputs.aimX));
-        inputs.lastFireTime = now;
-    } else if (!isAiming && now - inputs.lastFireTime > fireRate) {
-        // Auto-fire at nearest
-        const nearest = getNearestEnemy();
-        if (nearest) {
-            const angle = Math.atan2(nearest.y - player.y, nearest.x - player.x);
-            createWeapon(angle);
-            inputs.lastFireTime = now;
-        }
-    }
-
-    // 4. Update Projectiles
-    for (let i = entities.projectiles.length - 1; i >= 0; i--) {
-        const p = entities.projectiles[i];
-        p.x += p.dx;
-        p.y += p.dy;
-        if (now - p.spawnTime > p.lifetime) entities.projectiles.splice(i, 1);
-    }
-
-    // 5. Update Enemies & Collision (Quadtree)
-    quadtree = new Quadtree({ x: 0, y: 0, width: WORLD_WIDTH, height: WORLD_HEIGHT });
-    entities.enemies.forEach(e => quadtree.insert({ x: e.x, y: e.y, width: e.size, height: e.size, ref: e }));
-
-    entities.enemies.forEach(enemy => {
-        // Move towards player
-        const angle = Math.atan2(player.y - enemy.y, player.x - enemy.x);
-        enemy.x += Math.cos(angle) * enemy.speed;
-        enemy.y += Math.sin(angle) * enemy.speed;
-        
-        // Player Collision
-        const distToPlayer = Math.hypot(player.x - enemy.x, player.y - enemy.y);
-        if (distToPlayer < (player.size/2 + enemy.size/2) && !player.isInvincible && !player.isDashing) {
-            player.lives--;
-            vibrate(100);
-            playSound('playerScream');
-            player.isInvincible = true;
-            setTimeout(() => player.isInvincible = false, 1000);
-            if (player.lives <= 0) endGame();
-        }
-    });
-
-    // Projectile vs Enemy Collision
-    entities.projectiles.forEach(proj => {
-        if (!proj.active) return;
-        const targets = quadtree.retrieve({ x: proj.x, y: proj.y, width: proj.size, height: proj.size });
-        
-        for (let t of targets) {
-            const enemy = t.ref;
-            const dist = Math.hypot(proj.x - enemy.x, proj.y - enemy.y);
-            if (dist < (proj.size/2 + enemy.size/2)) {
-                enemy.health -= proj.damage;
-                proj.active = false; // Destroy bullet
-                if (enemy.health <= 0) handleEnemyDeath(enemy);
-                break; // One bullet hits one enemy (unless penetrating)
+    if (now - inputs.lastFireTap > fireRate) {
+        // Auto-aim or manual
+        if (isAiming) {
+            createWeapon(Math.atan2(inputs.aimY, inputs.aimX));
+            inputs.lastFireTap = now;
+        } else {
+            const nearest = getNearestEnemy();
+            if(nearest) {
+                createWeapon(Math.atan2(nearest.y - player.y, nearest.x - player.x));
+                inputs.lastFireTap = now;
             }
         }
+    }
+
+    // 4. Enemies & Collision
+    quadtree.clear();
+    entities.enemies.forEach(e => quadtree.insert({x:e.x-e.size/2, y:e.y-e.size/2, width:e.size, height:e.size, ref:e}));
+
+    entities.enemies.forEach(e => {
+        // Move to player
+        const angle = Math.atan2(player.y - e.y, player.x - e.x);
+        e.x += Math.cos(angle) * e.speed;
+        e.y += Math.sin(angle) * e.speed;
+
+        // Hit Player
+        const dist = Math.hypot(player.x - e.x, player.y - e.y);
+        if (dist < (player.size/2 + e.size/2) && !player.isInvincible && !player.isDashing) {
+            player.lives--;
+            player.isInvincible = true;
+            setTimeout(()=>player.isInvincible=false, 1000);
+            playSound('playerScream');
+            vibrate(100);
+            if(player.lives <= 0) endGame();
+        }
     });
+
+    // Projectiles
+    for(let i=entities.projectiles.length-1; i>=0; i--) {
+        const p = entities.projectiles[i];
+        p.x += p.dx; p.y += p.dy;
+        
+        // Quadtree collision
+        const targets = quadtree.retrieve({x:p.x, y:p.y, width:p.size, height:p.size});
+        let hit = false;
+        for(let t of targets) {
+            const e = t.ref;
+            const d = Math.hypot(p.x - e.x, p.y - e.y);
+            if (d < (p.size/2 + e.size/2)) {
+                e.health -= p.damage;
+                if(e.health <= 0) handleEnemyDeath(e);
+                hit = true;
+                break;
+            }
+        }
+
+        if(hit || now > p.lifetime) entities.projectiles.splice(i, 1);
+    }
     
-    // Cleanup Dead Enemies/Projectiles
     entities.enemies = entities.enemies.filter(e => e.health > 0);
-    entities.projectiles = entities.projectiles.filter(p => p.active);
 }
 
-// === DRAWING ===
+// === DRAW ===
 function draw() {
-    // Camera Logic
     const camX = Math.max(0, Math.min(WORLD_WIDTH - canvas.width, player.x - canvas.width/2));
     const camY = Math.max(0, Math.min(WORLD_HEIGHT - canvas.height, player.y - canvas.height/2));
-    
+
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.save();
     ctx.translate(-camX, -camY);
-    
-    // Draw Background
-    // (In a real implementation, tile the background or draw image)
-    ctx.fillStyle = '#222';
-    ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-    ctx.strokeStyle = '#333';
-    ctx.strokeRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
 
-    // Draw Pickups
-    ctx.fillStyle = 'gold';
+    // BG
+    ctx.fillStyle = '#222';
+    ctx.fillRect(0,0, WORLD_WIDTH, WORLD_HEIGHT);
+    // Draw Background Image if loaded
+    if (backgroundImages[gameState.selectedMapIndex > -1 ? gameState.selectedMapIndex : 0]) {
+        ctx.drawImage(backgroundImages[gameState.selectedMapIndex > -1 ? gameState.selectedMapIndex : 0], 0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    }
+
+    // Entities
     entities.pickups.forEach(p => {
-        ctx.font = '20px sans-serif';
-        ctx.fillText('🔸', p.x, p.y);
+        ctx.font='20px sans-serif'; ctx.fillText('🔸', p.x, p.y);
     });
 
-    // Draw Enemies
     entities.enemies.forEach(e => {
-        ctx.font = `${e.size}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        // Flip sprite if moving left
+        ctx.font=`${e.size}px sans-serif`; ctx.textAlign='center'; ctx.textBaseline='middle';
         ctx.fillText(e.emoji, e.x, e.y);
     });
 
-    // Draw Projectiles
     entities.projectiles.forEach(p => {
-        ctx.save();
-        ctx.translate(p.x, p.y);
-        ctx.rotate(p.angle);
-        ctx.font = `${p.size}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.angle);
+        ctx.font=`${p.size}px sans-serif`; ctx.textAlign='center'; ctx.textBaseline='middle';
         ctx.fillText(p.emoji, 0, 0);
         ctx.restore();
     });
 
-    // Draw Player
+    // Player
     ctx.save();
     ctx.translate(player.x, player.y);
-    if (player.isDashing) ctx.rotate(Date.now() / 100); // Spin on dash
-    const charData = CHARACTERS[gameState.equippedCharacterID] || CHARACTERS['cowboy'];
-    ctx.font = `${player.size}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(charData.emoji, 0, 0);
-    
-    // Draw Dash Cooldown Bar
-    const dashCharge = Math.min(1, (Date.now() - player.lastDashTime) / player.dashCooldown);
-    if (dashCharge < 1) {
-        ctx.fillStyle = 'cyan';
-        ctx.fillRect(-15, 20, 30 * dashCharge, 3);
-    }
+    if(player.isDashing) ctx.rotate(Date.now()/100);
+    const char = CHARACTERS[gameState.equippedCharacterID];
+    ctx.font=`${player.size}px sans-serif`; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(char.emoji, 0, 0);
     ctx.restore();
 
     ctx.restore();
 }
 
-// === GAMEPLAY HELPERS ===
-
+// === HELPERS ===
 function spawnEnemy() {
-    // Simple edge spawn logic
+    const types = Object.keys(ENEMY_CONFIGS);
+    const type = types[Math.floor(Math.random()*types.length)];
+    const cfg = ENEMY_CONFIGS[type];
+    if(cfg.minLevel > player.level) return; // simple check
+
     const angle = Math.random() * Math.PI * 2;
-    const r = Math.hypot(WORLD_WIDTH, WORLD_HEIGHT) / 2; // Spawn far out
-    const x = player.x + Math.cos(angle) * 600; 
-    const y = player.y + Math.sin(angle) * 600;
-    
-    // Clamp to world (simplified)
-    const bx = Math.max(20, Math.min(WORLD_WIDTH-20, x));
-    const by = Math.max(20, Math.min(WORLD_HEIGHT-20, y));
-
+    const dist = 600;
     entities.enemies.push({
-        x: bx, y: by,
-        size: 25,
-        speed: 1 + Math.random(),
-        health: 2 + player.level * 0.5,
-        emoji: Math.random() > 0.8 ? '💀' : '🧟'
+        x: player.x + Math.cos(angle)*dist,
+        y: player.y + Math.sin(angle)*dist,
+        size: cfg.size,
+        emoji: type,
+        speed: cfg.speedMultiplier * (0.84 + player.level*0.02),
+        health: cfg.baseHealth + player.level*0.5
     });
-}
-
-function handleEnemyDeath(enemy) {
-    gameState.enemiesDefeated++;
-    gameState.score += 10;
-    playerStats.totalKills++;
-    playSound('enemyDeath');
-    
-    // Drop Coin
-    player.coins++;
-    
-    // Drop XP
-    player.xp += 1;
-    if (player.xp >= player.xpToNextLevel) {
-        player.xp = 0;
-        player.level++;
-        player.xpToNextLevel = Math.floor(player.xpToNextLevel * 1.5);
-        playSound('levelUp');
-        showUpgradeMenu(applyUpgrade);
-    }
-}
-
-function applyUpgrade(opt) {
-    if (opt.type === 'damage') player.damageMultiplier += opt.value;
-    else if (opt.type === 'speed') player.speed += opt.value;
-    // ... handle other types
 }
 
 function createWeapon(angle) {
     playSound('playerShoot');
+    const isSkull = gameState.equippedCharacterID === 'skull';
     
-    const isSkull = player.isSkullCharacter;
-    
-    // SKULL LOGIC: V-Spread Pattern
+    // Skull V-Spread logic integrated
     const count = isSkull ? 2 : 1; 
-    const spread = 0.2; // Radians
+    const spread = 0.2;
     
-    for(let i = 0; i < count; i++) {
-        const actualAngle = isSkull ? (angle - spread/2 + i*spread) : angle;
-        
+    for(let i=0; i<count; i++) {
+        const finalAngle = isSkull ? (angle - spread/2 + i*spread) : angle;
         entities.projectiles.push({
-            x: player.x,
-            y: player.y,
-            dx: Math.cos(actualAngle) * 7,
-            dy: Math.sin(actualAngle) * 7,
+            x: player.x, y: player.y,
+            dx: Math.cos(finalAngle)*7, dy: Math.sin(finalAngle)*7,
+            angle: finalAngle,
             size: isSkull ? 20 : 10,
-            emoji: isSkull ? '🦴' : '🔹', // SKULL LOGIC: Bone sprite
-            damage: player.damageMultiplier * (isSkull ? 0.8 : 1.0), // Skull does slightly less dmg per bone but fires 2
-            lifetime: 2000,
-            spawnTime: Date.now(),
-            active: true,
-            angle: actualAngle
+            emoji: isSkull ? '🦴' : '🔹',
+            damage: player.damageMultiplier,
+            lifetime: Date.now() + 2000
         });
     }
 }
 
-// Exported for Systems to call
-export function triggerDash(entity) {
+function triggerDash(entity) {
+    if(entity.isDashing) return;
     const now = Date.now();
-    if (entity.isDashing || now - entity.lastDashTime < entity.dashCooldown) return;
+    if(now - entity.lastDashTime < entity.dashCooldown) return;
     
     entity.isDashing = true;
     entity.lastDashTime = now;
+    entity.dashEndTime = now + 300;
     playSound('dodge');
-    vibrate(50);
     
-    // SKULL LOGIC: Bone Nova on Dash
-    if (entity.isSkullCharacter) {
-        const novaCount = 8;
-        for(let i=0; i<novaCount; i++) {
-            const angle = (Math.PI * 2 / novaCount) * i;
+    // Skull Nova Logic
+    if(gameState.equippedCharacterID === 'skull' && entity === player) {
+        for(let i=0; i<8; i++) {
+            const a = (Math.PI*2/8)*i;
             entities.projectiles.push({
-                x: entity.x,
-                y: entity.y,
-                dx: Math.cos(angle) * 6,
-                dy: Math.sin(angle) * 6,
-                size: 20,
-                emoji: '🦴',
-                damage: player.damageMultiplier,
-                lifetime: 1000,
-                spawnTime: now,
-                active: true,
-                angle: angle
+                x:player.x, y:player.y,
+                dx:Math.cos(a)*6, dy:Math.sin(a)*6, angle:a,
+                size:20, emoji:'🦴', damage:player.damageMultiplier, lifetime:Date.now()+1000
             });
         }
     }
 }
 
+function handleEnemyDeath(e) {
+    gameState.enemiesDefeated++;
+    gameState.score += 10;
+    player.coins++;
+    player.xp++;
+    playSound('enemyDeath');
+    if(player.xp >= player.xpToNextLevel) {
+        showLevelUpMenu((opt) => {
+            // apply upgrade logic
+            if(opt.type==='speed') player.speed *= (1+opt.value);
+            // ... add others
+            player.level++;
+            player.xp = 0;
+            player.xpToNextLevel = Math.ceil(player.xpToNextLevel * 1.5);
+        });
+    }
+}
+
 function getNearestEnemy() {
-    let nearest = null;
-    let minDst = Infinity;
+    let nearest = null, minDist = Infinity;
     entities.enemies.forEach(e => {
         const d = Math.hypot(e.x - player.x, e.y - player.y);
-        if (d < minDst) { minDst = d; nearest = e; }
+        if(d < minDist) { minDist = d; nearest = e; }
     });
     return nearest;
 }
@@ -379,11 +331,10 @@ function getNearestEnemy() {
 function endGame() {
     gameState.gameActive = false;
     gameState.gameOver = true;
-    playerData.currency += player.coins; // Save earned coins
+    playerData.currency += player.coins;
     saveGameData();
     playSound('gameOver');
-    showGameOverScreen();
+    document.getElementById('gameOverlay').style.display = 'flex';
 }
 
-// Start
 init();
