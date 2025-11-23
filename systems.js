@@ -1,9 +1,8 @@
 // systems.js - Input, Audio, Quadtree, and Render Utilities
-import { gameState, player, WORLD_WIDTH, WORLD_HEIGHT, ASSETS } from './data.js';
+// ========================================================
+import { gameState, player, WORLD_WIDTH, WORLD_HEIGHT } from './data.js';
 
-// ================================================================================= //
-// ======================= OPTIMIZATION: QUADTREE IMPLEMENTATION =================== //
-// ================================================================================= //
+// === QUADTREE ===
 export class Quadtree {
     constructor(bounds, maxObjects = 10, maxLevels = 4, level = 0) {
         this.bounds = bounds;
@@ -16,9 +15,7 @@ export class Quadtree {
 
     clear() {
         this.objects = [];
-        for (let i = 0; i < this.nodes.length; i++) {
-            this.nodes[i].clear();
-        }
+        for (let i = 0; i < this.nodes.length; i++) this.nodes[i].clear();
         this.nodes = [];
     }
 
@@ -28,7 +25,6 @@ export class Quadtree {
         const subHeight = this.bounds.height / 2;
         const x = this.bounds.x;
         const y = this.bounds.y;
-
         this.nodes[0] = new Quadtree({ x: x + subWidth, y: y, width: subWidth, height: subHeight }, this.maxObjects, this.maxLevels, nextLevel);
         this.nodes[1] = new Quadtree({ x: x, y: y, width: subWidth, height: subHeight }, this.maxObjects, this.maxLevels, nextLevel);
         this.nodes[2] = new Quadtree({ x: x, y: y + subHeight, width: subWidth, height: subHeight }, this.maxObjects, this.maxLevels, nextLevel);
@@ -39,16 +35,12 @@ export class Quadtree {
         let index = -1;
         const verticalMidpoint = this.bounds.x + (this.bounds.width / 2);
         const horizontalMidpoint = this.bounds.y + (this.bounds.height / 2);
-
         const topQuadrant = (pRect.y < horizontalMidpoint && pRect.y + pRect.height < horizontalMidpoint);
         const bottomQuadrant = (pRect.y > horizontalMidpoint);
-
         if (pRect.x < verticalMidpoint && pRect.x + pRect.width < verticalMidpoint) {
-            if (topQuadrant) index = 1;
-            else if (bottomQuadrant) index = 2;
+            if (topQuadrant) index = 1; else if (bottomQuadrant) index = 2;
         } else if (pRect.x > verticalMidpoint) {
-            if (topQuadrant) index = 0;
-            else if (bottomQuadrant) index = 3;
+            if (topQuadrant) index = 0; else if (bottomQuadrant) index = 3;
         }
         return index;
     }
@@ -56,23 +48,16 @@ export class Quadtree {
     insert(pRect) {
         if (this.nodes.length) {
             const index = this.getIndex(pRect);
-            if (index !== -1) {
-                this.nodes[index].insert(pRect);
-                return;
-            }
+            if (index !== -1) { this.nodes[index].insert(pRect); return; }
         }
         this.objects.push(pRect);
-
         if (this.objects.length > this.maxObjects && this.level < this.maxLevels) {
             if (!this.nodes.length) this.split();
             let i = 0;
             while (i < this.objects.length) {
                 const index = this.getIndex(this.objects[i]);
-                if (index !== -1) {
-                    this.nodes[index].insert(this.objects.splice(i, 1)[0]);
-                } else {
-                    i++;
-                }
+                if (index !== -1) this.nodes[index].insert(this.objects.splice(i, 1)[0]);
+                else i++;
             }
         }
     }
@@ -81,258 +66,68 @@ export class Quadtree {
         let returnObjects = this.objects;
         const index = this.getIndex(pRect);
         if (this.nodes.length) {
-            if (index !== -1) {
-                returnObjects = returnObjects.concat(this.nodes[index].retrieve(pRect));
-            } else {
-                for (let i = 0; i < this.nodes.length; i++) {
-                    returnObjects = returnObjects.concat(this.nodes[i].retrieve(pRect));
-                }
-            }
+            if (index !== -1) returnObjects = returnObjects.concat(this.nodes[index].retrieve(pRect));
+            else for (let i = 0; i < this.nodes.length; i++) returnObjects = returnObjects.concat(this.nodes[i].retrieve(pRect));
         }
         return returnObjects;
     }
 }
 
-// ================================================================================= //
-// ======================= INPUT MANAGER =========================================== //
-// ================================================================================= //
+// === INPUT STATE ===
 export const inputs = {
-    moveX: 0,
-    moveY: 0,
-    aimX: 0,
-    aimY: 0,
+    moveX: 0, moveY: 0,
+    aimX: 0, aimY: 0,
     keys: {},
+    gamepadIndex: null,
     activeTouches: {},
-    isFiring: false,
-    lastFireStickTap: 0,
-    gamepadIndex: null
+    lastFireTap: 0
 };
 
-// Internal Joystick Logic
-function getJoystickInput(touchClientX, touchClientY, baseElement, capElement) {
-    const rect = baseElement.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
-    let dx = touchClientX - centerX;
-    let dy = touchClientY - centerY;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    const radius = 51; // Hardcoded match to CSS
-    
-    if (distance > radius) {
-        const angle = Math.atan2(dy, dx);
-        dx = Math.cos(angle) * radius;
-        dy = Math.sin(angle) * radius;
-    }
-    if (capElement) capElement.style.transform = `translate(${dx}px, ${dy}px)`;
-    return { dx, dy };
-}
-
-export function setupInput(triggerDashCallback) {
-    const movementStickBase = document.getElementById('movement-stick-base');
-    const movementStickCap = document.getElementById('movement-stick-cap');
-    const firestickBase = document.getElementById('fire-stick-base');
-    const firestickCap = document.getElementById('fire-stick-cap');
-
-    // Keyboard
-    window.addEventListener('keydown', (e) => inputs.keys[e.key] = true);
-    window.addEventListener('keyup', (e) => inputs.keys[e.key] = false);
-
-    // Mouse
-    window.addEventListener('mousemove', (e) => {
-        if (!gameState.gameActive) return;
-        const canvas = document.getElementById('gameCanvas');
-        const rect = canvas.getBoundingClientRect();
-        gameState.mouseX = e.clientX - rect.left;
-        gameState.mouseY = e.clientY - rect.top;
-        // Aim calculation happens in game loop based on camera offset
-    });
-
-    // Touch
-    document.body.addEventListener('touchstart', (e) => {
-        if (!gameState.gameActive || gameState.gamePaused) return;
-        // Simple check to ensure we aren't touching a modal
-        if (document.getElementById('gameGuideModal').style.display === 'flex') return;
-
-        for (let i = 0; i < e.changedTouches.length; i++) {
-            const touch = e.changedTouches[i];
-            const moveRect = movementStickBase.getBoundingClientRect();
-            const fireRect = firestickBase.getBoundingClientRect();
-
-            if (touch.clientX > moveRect.left && touch.clientX < moveRect.right && 
-                touch.clientY > moveRect.top && touch.clientY < moveRect.bottom) {
-                inputs.activeTouches[touch.identifier] = 'movement';
-                const { dx, dy } = getJoystickInput(touch.clientX, touch.clientY, movementStickBase, movementStickCap);
-                const mag = Math.hypot(dx, dy);
-                if (mag > 0) { inputs.moveX = dx/mag; inputs.moveY = dy/mag; }
-            } 
-            else if (touch.clientX > fireRect.left && touch.clientX < fireRect.right &&
-                     touch.clientY > fireRect.top && touch.clientY < fireRect.bottom) {
-                inputs.activeTouches[touch.identifier] = 'fire';
-                
-                // Double tap dodge logic
-                const now = Date.now();
-                if (now - inputs.lastFireStickTap < 300) {
-                    if(triggerDashCallback) triggerDashCallback(player);
-                }
-                inputs.lastFireStickTap = now;
-
-                const { dx, dy } = getJoystickInput(touch.clientX, touch.clientY, firestickBase, firestickCap);
-                inputs.aimX = dx; inputs.aimY = dy;
-            }
-        }
-    }, { passive: false });
-
-    document.body.addEventListener('touchmove', (e) => {
-        if (!gameState.gameActive) return;
-        e.preventDefault();
-        for (let i = 0; i < e.changedTouches.length; i++) {
-            const touch = e.changedTouches[i];
-            const type = inputs.activeTouches[touch.identifier];
-            if (type === 'movement') {
-                const { dx, dy } = getJoystickInput(touch.clientX, touch.clientY, movementStickBase, movementStickCap);
-                const mag = Math.hypot(dx, dy);
-                if (mag > 0) { inputs.moveX = dx/mag; inputs.moveY = dy/mag; }
-                else { inputs.moveX = 0; inputs.moveY = 0; }
-            } else if (type === 'fire') {
-                const { dx, dy } = getJoystickInput(touch.clientX, touch.clientY, firestickBase, firestickCap);
-                inputs.aimX = dx; inputs.aimY = dy;
-            }
-        }
-    }, { passive: false });
-
-    const endTouch = (e) => {
-        for (let i = 0; i < e.changedTouches.length; i++) {
-            const touch = e.changedTouches[i];
-            const type = inputs.activeTouches[touch.identifier];
-            if (type === 'movement') {
-                inputs.moveX = 0; inputs.moveY = 0;
-                movementStickCap.style.transform = 'translate(0,0)';
-            } else if (type === 'fire') {
-                inputs.aimX = 0; inputs.aimY = 0;
-                firestickCap.style.transform = 'translate(0,0)';
-            }
-            delete inputs.activeTouches[touch.identifier];
-        }
-    };
-    document.body.addEventListener('touchend', endTouch);
-    document.body.addEventListener('touchcancel', endTouch);
-
-    // Gamepad Connection
-    window.addEventListener("gamepadconnected", (e) => inputs.gamepadIndex = e.gamepad.index);
-    window.addEventListener("gamepaddisconnected", (e) => { if (inputs.gamepadIndex === e.gamepad.index) inputs.gamepadIndex = null; });
-}
-
-export function updateGamepad(triggerDashCallback, togglePauseCallback) {
-    if (inputs.gamepadIndex === null) return;
-    const gp = navigator.getGamepads()[inputs.gamepadIndex];
-    if (!gp) return;
-
-    const deadzone = 0.2;
-    const applyDZ = (v) => (Math.abs(v) < deadzone ? 0 : v);
-
-    // Movement
-    const lx = applyDZ(gp.axes[0]);
-    const ly = applyDZ(gp.axes[1]);
-    const lmag = Math.hypot(lx, ly);
-    if (lmag > 0) { inputs.moveX = lx/lmag; inputs.moveY = ly/lmag; } 
-    else { inputs.moveX = 0; inputs.moveY = 0; }
-
-    // Aim
-    const rx = applyDZ(gp.axes[2]);
-    const ry = applyDZ(gp.axes[3]);
-    const rmag = Math.hypot(rx, ry);
-    if (rmag > 0) { inputs.aimX = rx/rmag; inputs.aimY = ry/rmag; }
-    else { inputs.aimX = 0; inputs.aimY = 0; }
-
-    // Dash (Right Trigger - Button 7)
-    if (gp.buttons[7]?.pressed && !gp._rTriggerLatch) {
-        gp._rTriggerLatch = true;
-        if(triggerDashCallback) triggerDashCallback(player);
-    } else if (!gp.buttons[7]?.pressed) gp._rTriggerLatch = false;
-
-    // Pause (Start - 9, or Select - 8)
-    if ((gp.buttons[9]?.pressed || gp.buttons[1]?.pressed) && !gp._pauseLatch) {
-        gp._pauseLatch = true;
-        if(togglePauseCallback) togglePauseCallback();
-    } else if (!gp.buttons[9]?.pressed && !gp.buttons[1]?.pressed) gp._pauseLatch = false;
-}
-
-
-// ================================================================================= //
-// ======================= AUDIO SYSTEM ============================================ //
-// ================================================================================= //
-export const audio = {
-    players: {},
-    bgmPlayer: null,
-    contextStarted: false
+// === ASSETS & AUDIO ===
+export const ASSETS = {
+    sprites: {
+        gun: 'sprites/gun.png', bullet: 'sprites/bullet.png', circle: 'sprites/circle.png',
+        pickupBox: 'sprites/pickupbox.png', slime: 'sprites/slime.png',
+        playerUp: 'sprites/playerup.png', playerDown: 'sprites/playerdown.png',
+        playerLeft: 'sprites/playerleft.png', playerRight: 'sprites/playerright.png',
+        levelUpBox: 'sprites/levelupbox.png', spinninglight: 'sprites/spinninglight.png',
+        bloodPuddle: 'sprites/blood.png', crosshair: 'sprites/crosshair.png'
+    },
+    audio: {
+        playerShoot: 'audio/fire_shot.mp3', xpPickup: 'audio/pick_up_xp.mp3',
+        boxPickup: 'audio/pick_up_power.mp3', levelUp: 'audio/level_up.mp3',
+        levelUpSelect: 'audio/level_up_end.mp3', enemyDeath: 'audio/enemy_death.mp3',
+        gameOver: 'audio/gameover.mp3', playerScream: 'audio/scream.mp3',
+        uiClick: 'audio/click.mp3', mainMenu: 'audio/mainmenu.mp3',
+        dodge: 'audio/dodge.mp3'
+    },
+    backgrounds: [
+        'sprites/Background6.png', 'sprites/Background2.png', 'sprites/Background3.png',
+        'sprites/Background4.png', 'sprites/Background5.png', 'sprites/Background8.png',
+        'sprites/Background1.png', 'sprites/Background7.png', 'sprites/Background9.png'
+    ]
 };
 
+export const sprites = {};
+export const audioPlayers = {};
+export const backgroundImages = [];
+export const preRenderedEntities = {};
+
+// Helper to get safe time for Tone.js
 export function getSafeToneTime() {
     let now = Tone.now();
-    // Safety check for Tone.js timing issues
-    return now + 0.05; 
-}
-
-export function loadAssets(onComplete) {
-    let toLoad = Object.keys(ASSETS.sprites).length + Object.keys(ASSETS.audio).length + ASSETS.backgrounds.length;
-    let loaded = 0;
-
-    const checkDone = () => {
-        loaded++;
-        if (loaded >= toLoad) onComplete();
-    };
-
-    // Images
-    export const sprites = {};
-    export const backgrounds = [];
-
-    for (const [key, path] of Object.entries(ASSETS.sprites)) {
-        const img = new Image();
-        img.src = path;
-        img.onload = () => { sprites[key] = img; checkDone(); };
-        img.onerror = () => { console.error("Missing sprite:", path); checkDone(); };
-    }
-
-    ASSETS.backgrounds.forEach((path, i) => {
-        const img = new Image();
-        img.src = path;
-        img.onload = () => { backgrounds[i] = img; checkDone(); };
-        img.onerror = checkDone;
-    });
-
-    // Audio
-    for (const [key, path] of Object.entries(ASSETS.audio)) {
-        audio.players[key] = new Tone.Player({
-            url: path,
-            autostart: false,
-            loop: key === 'mainMenu',
-            onload: checkDone
-        }).toDestination();
-    }
-    
-    // Synths for procedural sounds
-    audio.swordSynth = new Tone.Synth({ oscillator: { type: "sine" }, envelope: { attack: 0.005, decay: 0.1, sustain: 0.01, release: 0.05 } }).toDestination();
-    audio.explosionSynth = new Tone.Synth({ oscillator: { type: "sawtooth" }, envelope: { attack: 0.001, decay: 0.1, sustain: 0.01, release: 0.2 } }).toDestination();
+    return now + 0.05;
 }
 
 export function playSound(name) {
-    if (gameState.gameActive && !gameState.gamePaused && audio.players[name]) {
-        if(audio.players[name].state === "started") audio.players[name].stop();
-        audio.players[name].start();
+    if (gameState.gameActive && !gameState.gamePaused && audioPlayers[name]) {
+        if(audioPlayers[name].state === 'started') audioPlayers[name].stop();
+        audioPlayers[name].start(getSafeToneTime());
     }
 }
-
 export function playUISound(name) {
-    if (audio.players[name]) {
-         if(audio.players[name].state === "started") audio.players[name].stop();
-         audio.players[name].start();
-    }
+    if (audioPlayers[name]) audioPlayers[name].start(getSafeToneTime());
 }
-
-// ================================================================================= //
-// ======================= RENDERING UTILS ========================================= //
-// ================================================================================= //
-export const preRenderedEntities = {};
 
 export function preRenderEmoji(emoji, size) {
     const bufferCanvas = document.createElement('canvas');
@@ -349,4 +144,147 @@ export function preRenderEmoji(emoji, size) {
 
 export function vibrate(duration) {
     if (navigator.vibrate) navigator.vibrate(duration);
+}
+
+// === INPUT SETUP ===
+function getJoystickInput(clientX, clientY, base, cap) {
+    const rect = base.getBoundingClientRect();
+    const cx = rect.left + rect.width/2;
+    const cy = rect.top + rect.height/2;
+    let dx = clientX - cx;
+    let dy = clientY - cy;
+    const dist = Math.hypot(dx, dy);
+    const rad = 51; // Hardcoded radius
+    if (dist > rad) {
+        const angle = Math.atan2(dy, dx);
+        dx = Math.cos(angle) * rad;
+        dy = Math.sin(angle) * rad;
+    }
+    if(cap) cap.style.transform = `translate(${dx}px, ${dy}px)`;
+    return { dx, dy };
+}
+
+export function setupInput(triggerDash) {
+    const mBase = document.getElementById('movement-stick-base');
+    const mCap = document.getElementById('movement-stick-cap');
+    const fBase = document.getElementById('fire-stick-base');
+    const fCap = document.getElementById('fire-stick-cap');
+
+    // Keys
+    window.addEventListener('keydown', e => inputs.keys[e.key] = true);
+    window.addEventListener('keyup', e => inputs.keys[e.key] = false);
+
+    // Mouse
+    window.addEventListener('mousemove', e => {
+        if (!gameState.gameActive) return;
+        const rect = document.getElementById('gameCanvas').getBoundingClientRect();
+        gameState.mouseX = e.clientX - rect.left;
+        gameState.mouseY = e.clientY - rect.top;
+    });
+
+    // Touch
+    document.body.addEventListener('touchstart', e => {
+        if (!gameState.gameActive || gameState.gamePaused) return;
+        // Don't interact through modals
+        if (document.getElementById('gameGuideModal').style.display === 'flex') return;
+
+        for (let i=0; i<e.changedTouches.length; i++) {
+            const t = e.changedTouches[i];
+            const mRect = mBase.getBoundingClientRect();
+            const fRect = fBase.getBoundingClientRect();
+
+            if (t.clientX > mRect.left && t.clientX < mRect.right && t.clientY > mRect.top && t.clientY < mRect.bottom) {
+                inputs.activeTouches[t.identifier] = 'move';
+                const {dx, dy} = getJoystickInput(t.clientX, t.clientY, mBase, mCap);
+                const mag = Math.hypot(dx, dy);
+                if(mag>0) { inputs.moveX = dx/mag; inputs.moveY = dy/mag; }
+            } else if (t.clientX > fRect.left && t.clientX < fRect.right && t.clientY > fRect.top && t.clientY < fRect.bottom) {
+                inputs.activeTouches[t.identifier] = 'fire';
+                
+                // Double tap to dash logic
+                const now = Date.now();
+                if(now - inputs.lastFireTap < 300) triggerDash(player);
+                inputs.lastFireTap = now;
+
+                const {dx, dy} = getJoystickInput(t.clientX, t.clientY, fBase, fCap);
+                inputs.aimX = dx; inputs.aimY = dy;
+            }
+        }
+    }, {passive:false});
+
+    const endTouch = e => {
+        for(let i=0; i<e.changedTouches.length; i++) {
+            const t = e.changedTouches[i];
+            const type = inputs.activeTouches[t.identifier];
+            if(type === 'move') {
+                inputs.moveX = 0; inputs.moveY = 0;
+                mCap.style.transform = 'translate(0,0)';
+            } else if (type === 'fire') {
+                inputs.aimX = 0; inputs.aimY = 0;
+                fCap.style.transform = 'translate(0,0)';
+            }
+            delete inputs.activeTouches[t.identifier];
+        }
+    };
+    document.body.addEventListener('touchend', endTouch);
+    document.body.addEventListener('touchcancel', endTouch);
+
+    // Gamepad
+    window.addEventListener('gamepadconnected', e => inputs.gamepadIndex = e.gamepad.index);
+    window.addEventListener('gamepaddisconnected', e => { if(inputs.gamepadIndex === e.gamepad.index) inputs.gamepadIndex = null; });
+}
+
+export function updateGamepad(triggerDash, togglePause) {
+    if (inputs.gamepadIndex === null) return;
+    const gp = navigator.getGamepads()[inputs.gamepadIndex];
+    if (!gp) return;
+
+    const deadzone = 0.2;
+    const applyDZ = v => Math.abs(v) < deadzone ? 0 : v;
+
+    const lx = applyDZ(gp.axes[0]);
+    const ly = applyDZ(gp.axes[1]);
+    const lmag = Math.hypot(lx, ly);
+    if(lmag > 0) { inputs.moveX = lx/lmag; inputs.moveY = ly/lmag; } 
+    else { inputs.moveX = 0; inputs.moveY = 0; }
+
+    const rx = applyDZ(gp.axes[2]);
+    const ry = applyDZ(gp.axes[3]);
+    const rmag = Math.hypot(rx, ry);
+    if(rmag > 0) { inputs.aimX = rx/rmag; inputs.aimY = ry/rmag; }
+    else { inputs.aimX = 0; inputs.aimY = 0; }
+
+    // Dash (Button 7 / R2)
+    if(gp.buttons[7]?.pressed && !gp._rLatch) {
+        gp._rLatch = true;
+        triggerDash(player);
+    } else if (!gp.buttons[7]?.pressed) gp._rLatch = false;
+
+    // Pause
+    if((gp.buttons[9]?.pressed || gp.buttons[1]?.pressed) && !gp._pLatch) {
+        gp._pLatch = true;
+        togglePause();
+    } else if (!gp.buttons[9]?.pressed) gp._pLatch = false;
+}
+
+export function loadAssets(onComplete) {
+    // A simplified loader
+    let toLoad = Object.keys(ASSETS.sprites).length + Object.keys(ASSETS.audio).length + ASSETS.backgrounds.length;
+    let loaded = 0;
+    const check = () => { loaded++; if(loaded>=toLoad) onComplete(); };
+
+    for(const [k, v] of Object.entries(ASSETS.sprites)) {
+        const img = new Image(); img.src = v;
+        img.onload = () => { sprites[k]=img; check(); };
+        img.onerror = check; // proceed anyway
+    }
+    for(const [k, v] of Object.entries(ASSETS.audio)) {
+        audioPlayers[k] = new Tone.Player({ url: v, loop: k==='mainMenu' }).toDestination();
+        audioPlayers[k].onload = check;
+    }
+    ASSETS.backgrounds.forEach((path, i) => {
+        const img = new Image(); img.src = path;
+        img.onload = () => { backgroundImages[i]=img; check(); };
+        img.onerror = check;
+    });
 }
